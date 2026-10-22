@@ -22,6 +22,7 @@ function fixture(t, overrides = {}) {
       calls: [],
       exists: false,
       draft: true,
+      tagExists: false,
       sha,
       reviewed: true,
       ...overrides,
@@ -34,6 +35,15 @@ function fixture(t, overrides = {}) {
 const fs=require("node:fs"),args=process.argv.slice(2),file=process.env.GH_FIXTURE,s=JSON.parse(fs.readFileSync(file));
 s.calls.push(args);let out="",exit=0;
 if(args[0]==="api"&&args[1].includes("/commits/"))out=JSON.stringify(s.reviewed?[{number:7,merged_at:"2026-10-22",merge_commit_sha:process.env.GITHUB_SHA,base:{ref:"main"},head:{ref:"release-please--branches--main--components--signal"},title:"chore(main): release 1.0.0"}]:[]);
+else if(args[0]==="api"&&args[1].endsWith("/git/refs")) {
+ if(s.tagExists){exit=1;out=JSON.stringify({status:"422"});}
+ else{s.tagExists=true;s.sha=args.find(a=>a.startsWith("sha=")).slice(4);out=JSON.stringify({object:{type:"commit",sha:s.sha}});}
+}
+else if(args[0]==="api"&&args[1].includes("/git/ref/tags/")){
+ if(s.tagReadError){exit=1;out=JSON.stringify({status:String(s.tagReadError)});}
+ else if(!s.tagExists){exit=1;out=JSON.stringify({status:"404"});}
+ else out=JSON.stringify({object:{type:"commit",sha:s.sha}});
+}
 else if(args[0]==="api")out=JSON.stringify({object:{type:"commit",sha:s.sha}});
 else if(args[0]==="release"&&args[1]==="view"){if(!s.exists)exit=1;else out=JSON.stringify({isDraft:s.draft});}
 else if(args[0]==="release"&&args[1]==="create"){s.exists=true;s.draft=true;}
@@ -99,7 +109,7 @@ test("publisher gates on reviewed version and complete assets, then uploads befo
   assert.notEqual(f.run("publish").status, 0);
 });
 test("publisher refuses missing assets and moved tags without uploading", (t) => {
-  const f = fixture(t, { exists: true, sha: "b".repeat(40) });
+  const f = fixture(t, { exists: true, tagExists: true, sha: "b".repeat(40) });
   assert.notEqual(f.run("publish").status, 0);
   assert(!f.read().calls.some((a) => a[1] === "upload"));
   fs.unlinkSync(
@@ -122,4 +132,27 @@ test("ordinary main commits cannot publish", (t) => {
   assert.match(f.run("plan").stdout, /publish=false/);
   assert.notEqual(f.run("publish").status, 0);
   assert(!f.read().calls.some((a) => a[1] === "create"));
+});
+
+test("publisher recovers a tagless draft by creating the exact reviewed tag before upload", t => {
+  const f = fixture(t, { exists: true });
+  const result = f.run("publish");
+  assert.equal(result.status, 0, result.stderr);
+  const state = f.read();
+  const create = state.calls.findIndex(args => args[0] === "api" && args[1].endsWith("/git/refs"));
+  const upload = state.calls.findIndex(args => args[0] === "release" && args[1] === "upload");
+  assert.ok(create >= 0 && create < upload);
+  assert.ok(state.calls[create].includes("ref=refs/tags/v1.0.0"));
+  assert.ok(state.calls[create].includes("sha=" + sha));
+  assert.equal(state.draft, false);
+  assert.equal(state.calls.filter(args => args[0] === "release" && args[1] === "create").length, 0);
+});
+
+test("publisher reuses correct existing tags and never treats a permission failure as a missing tag", t => {
+  const existing = fixture(t, { exists: true, tagExists: true });
+  assert.equal(existing.run("publish").status, 0);
+  assert.ok(!existing.read().calls.some(args => args[0] === "api" && args[1].endsWith("/git/refs")));
+  const forbidden = fixture(t, { exists: true, tagReadError: 403 });
+  assert.notEqual(forbidden.run("publish").status, 0);
+  assert.ok(!forbidden.read().calls.some(args => args[1] === "upload" || args[1]?.endsWith("/git/refs")));
 });

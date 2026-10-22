@@ -92,9 +92,22 @@ if (process.argv[2] === "plan") {
       "Signal " + tag,
       "--generate-notes",
     ]);
-  const ref = JSON.parse(
-    gh(["api", "repos/" + repo + "/git/ref/tags/" + tag]),
-  ).object;
+  const tagPath = "repos/" + repo + "/git/ref/tags/" + tag;
+  const lookup = spawnSync("gh", ["api", tagPath], { encoding: "utf8" });
+  let ref;
+  if (lookup.status === 0) {
+    ref = JSON.parse(lookup.stdout).object;
+  } else {
+    let missing = false;
+    try { missing = String(JSON.parse(lookup.stdout).status) === "404"; } catch {}
+    if (!missing) throw Error("Unable to verify the release tag");
+    // A draft release does not create its target tag. Create it explicitly at
+    // the reviewed immutable release commit; never move an existing tag.
+    ref = JSON.parse(gh([
+      "api", "repos/" + repo + "/git/refs", "--method", "POST",
+      "-f", "ref=refs/tags/" + tag, "-f", "sha=" + sha,
+    ])).object;
+  }
   let commit = ref;
   if (ref.type === "tag")
     commit = JSON.parse(
