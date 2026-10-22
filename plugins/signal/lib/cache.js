@@ -23,7 +23,7 @@ export class Cache {
     this.db = new DatabaseSync(path.join(dir, "cache.db"));
     fs.chmodSync(path.join(dir, "cache.db"), 0o600);
     this.db.exec(
-      "PRAGMA journal_mode=DELETE;PRAGMA synchronous=FULL;PRAGMA busy_timeout=3000;" +
+      "PRAGMA journal_mode=DELETE;PRAGMA secure_delete=ON;PRAGMA synchronous=FULL;PRAGMA busy_timeout=3000;" +
         "CREATE TABLE IF NOT EXISTS chats(id TEXT PRIMARY KEY,kind TEXT NOT NULL,target TEXT NOT NULL,name TEXT NOT NULL,updated INTEGER NOT NULL DEFAULT 0);" +
         "CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,chat TEXT NOT NULL,author TEXT NOT NULL,ts INTEGER NOT NULL,payload TEXT NOT NULL,UNIQUE(chat,author,ts));" +
         "CREATE INDEX IF NOT EXISTS message_page ON messages(chat,ts,id);" +

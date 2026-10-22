@@ -16,6 +16,7 @@ export class Bridge {
       runtime.executable,
       [
         ...runtime.prefix,
+        "--disable-send-log",
         "--config",
         dir,
         "jsonRpc",
