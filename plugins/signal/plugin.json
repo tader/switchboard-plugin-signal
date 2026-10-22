@@ -1,0 +1,14 @@
+{
+  "id": "signal",
+  "name": "Signal",
+  "version": "0.0.0",
+  "description": "Signal linked-device chats, cached messages, text, quoted replies, reactions and poll votes.",
+  "icon": "icon.svg",
+  "settings": [
+    {
+      "key": "signalCliPath",
+      "label": "Signal CLI executable (optional)",
+      "description": "Use an existing compatible signal-cli executable. Otherwise a verified private runtime is downloaded automatically."
+    }
+  ]
+}

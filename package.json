@@ -1,0 +1,18 @@
+{
+  "name": "switchboard-plugin-signal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit && node scripts/check.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "integration": "node --disable-warning=ExperimentalWarning scripts/integration.js",
+    "build:runtime": "python3 scripts/build-runtime.py",
+    "test:runtime": "node --disable-warning=ExperimentalWarning scripts/runtime-smoke.js",
+    "integration:peers": "node --disable-warning=ExperimentalWarning scripts/peer-integration.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
