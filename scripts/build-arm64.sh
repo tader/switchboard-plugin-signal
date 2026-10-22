@@ -10,7 +10,7 @@ docker run --rm \
   -w /work/.local/build-sources/libsignal/libsignal-0.103.0 debian:bookworm-slim \
   bash -ceu '
     apt-get update
-    apt-get install -y --no-install-recommends build-essential clang cmake pkg-config protobuf-compiler libclang-dev curl ca-certificates
+    apt-get install -y --no-install-recommends build-essential clang cmake pkg-config protobuf-compiler libclang-dev curl ca-certificates python3 git
     bash java/build_jni.sh desktop
     cp java/client/src/main/resources/libsignal_jni_aarch64.so /work/.local/libsignal/
     strip --strip-unneeded /work/.local/libsignal/libsignal_jni_aarch64.so

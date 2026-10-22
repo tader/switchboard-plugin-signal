@@ -310,7 +310,7 @@ test("cache scopes cursors and message identity, applies restrictions, deletions
 test("platform selection and checksum verification fail closed", () => {
   assert.equal(platformKey("darwin", "arm64", undefined), "darwin-arm64");
   assert.equal(platformKey("linux", "x64", "2.36"), "linux-amd64");
-  assert.throws(() => platformKey("linux", "arm64", undefined), /glibc Linux/);
+  assert.throws(() => platformKey("linux", "arm64", null), /glibc Linux/);
   assert.throws(() => platformKey("win32", "x64", undefined), /glibc Linux/);
   const hash = "a".repeat(64);
   assert.equal(checksumFor(hash + "  file.tar.gz\n", "file.tar.gz"), hash);
