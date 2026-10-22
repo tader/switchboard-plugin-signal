@@ -38,7 +38,7 @@ The plugin never automatically sends read receipts or typing indicators. Signal'
 
 ## Reliable writes
 
-Every write requires an `idempotencyKey`. Repeating identical accepted content returns its saved receipt. Different content with the same key fails. A helper exit, timeout, partial failure or invalid receipt after a write starts leaves durable state `attempted`: delivery is uncertain and the plugin does not resend.
+Every write requires an `idempotencyKey`. Repeating identical accepted content returns its saved receipt, including after restarts or replacement-device linking. Different content with the same key fails. A helper exit, timeout, partial failure or invalid receipt after a write starts leaves durable state `attempted`: delivery is uncertain and the plugin does not resend.
 
 Inspect `/writes` and check Signal on your phone before deciding to send again. A new key denotes a new intentional write, not recovery for uncertain delivery. Signal offers no general lookup that can resolve every uncertain send.
 

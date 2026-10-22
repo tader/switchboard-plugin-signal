@@ -19,13 +19,17 @@ export function createAuth(pool) {
     }
     await fs.writeFile(
       path.join(s.dir, "active.json"),
-      JSON.stringify({ account: s.account }),
+      JSON.stringify({ account: s.account, cacheId: s.cacheId }),
       { mode: 0o600 },
     );
     if (f.oldProfile && f.oldProfile !== f.profile)
       await pool.drop(f.oldProfile);
     return {
-      credentials: { profile: f.profile, account: s.account },
+      credentials: {
+        profile: f.profile,
+        account: s.account,
+        cacheId: s.cacheId,
+      },
       account: { id: s.account, label: s.label },
       config: { access: f.access === "write" ? "write" : "read" },
     };
@@ -93,6 +97,7 @@ export function createAuth(pool) {
             profile,
             previous: connection?.credentials.account,
             oldProfile: connection?.credentials.profile,
+            cacheId: connection?.credentials.cacheId ?? randomUUID(),
             access: config.access,
             expires: Date.now() + 150000,
             done: false,
@@ -136,17 +141,31 @@ export function createAuth(pool) {
         if (!f.done) return { wait: true };
         pending.delete(state.id);
         try {
-          const s = await pool.activate(await pool.get(f.profile), f.account);
+          if (f.previous && f.account?.aci !== f.previous)
+            throw fail("account_mismatch", 403);
+          const s = await pool.activate(
+            await pool.get(f.profile),
+            f.account,
+            f.cacheId,
+          );
           return await finish(f, s);
         } catch (e) {
           await pool.drop(f.profile);
+          if (!f.oldProfile) await pool.dropCache(f.cacheId);
           throw e;
         }
       },
       async revoke(conn) {
         for (const [id, f] of pending)
-          if (f.profile === conn.credentials.profile) pending.delete(id);
+          if (
+            f.profile === conn.credentials.profile ||
+            f.oldProfile === conn.credentials.profile
+          ) {
+            pending.delete(id);
+            await pool.drop(f.profile);
+          }
         await pool.drop(conn.credentials.profile);
+        await pool.dropCache(conn.credentials.cacheId);
       },
     },
     async ready(conn) {

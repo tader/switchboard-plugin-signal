@@ -15,7 +15,7 @@ The owner needs Node 24+, `tar`, outbound access to GitHub releases and Signal, 
 ## Recovery
 
 - **Upgrade requirement:** update Switchboard to a release with QR device authorization.
-- **Revoked device:** reconnect, expand Advanced, and choose **Link a replacement device**. The original account must approve replacement.
+- **Revoked device:** reconnect, expand Advanced, and choose **Link a replacement device**. The original account must approve replacement. Cached history and write receipts are preserved.
 - **Wrong account:** link the original account, or create a separate connection.
 - **Unavailable runtime:** stable installations need a matching published release. A development installation can use an absolute local signal-cli executable.
 - **Checksum failure:** no downloaded program is executed. Retry after checking that the release assets are complete.

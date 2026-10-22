@@ -116,6 +116,7 @@ export class Pool {
   constructor(ctx) {
     this.ctx = ctx;
     this.helpers = new Map();
+    this.caches = new Map();
     this.closed = false;
   }
   profile(id) {
@@ -124,6 +125,10 @@ export class Pool {
     )
       throw fail("invalid_profile", 401);
     return path.join(this.ctx.dataDir, "profiles", id);
+  }
+  cacheDir(id) {
+    this.profile(id); // Cache handles use the same UUID validation as device profiles.
+    return path.join(this.ctx.dataDir, "caches", id);
   }
   async get(id) {
     if (this.closed) throw fail("plugin_unavailable", 503);
@@ -166,6 +171,7 @@ export class Pool {
         await handle.close();
       }
       const s = {
+        profile: id,
         dir,
         lock,
         account: null,
@@ -189,7 +195,7 @@ export class Pool {
           ? accounts.find((a) => a.aci === marker?.account)
           : null;
         if (marker && !account) throw fail("signin_required", 401);
-        if (account) await this.activate(s, account);
+        if (account) await this.activate(s, account, marker.cacheId ?? id);
         if (this.closed) throw fail("plugin_unavailable", 503);
         return s;
       } catch (e) {
@@ -205,12 +211,24 @@ export class Pool {
       throw e;
     }
   }
-  async activate(s, account) {
+  async activate(s, account, cacheId) {
     if (!/^[a-f0-9-]{36}$/i.test(account.aci ?? ""))
       throw fail("pairing_failed", 502);
     s.account = account.aci;
     s.label = account.number ?? account.aci;
-    s.cache ??= new Cache(s.dir, s.account);
+    if (!s.cache) {
+      const dir = this.cacheDir(cacheId);
+      let entry = this.caches.get(cacheId);
+      if (entry && entry.cache.account !== s.account)
+        throw fail("account_mismatch", 403);
+      if (!entry) {
+        entry = { cache: new Cache(dir, s.account), references: 0 };
+        this.caches.set(cacheId, entry);
+      }
+      entry.references++;
+      s.cacheId = cacheId;
+      s.cache = entry.cache;
+    }
     if (!s.subscribed) {
       await s.bridge.call("subscribeReceive");
       s.subscribed = true;
@@ -246,13 +264,23 @@ export class Pool {
   async session(conn) {
     const s = await this.get(conn.credentials.profile);
     if (!s.account) throw fail("signin_required", 401);
-    if (s.account !== conn.credentials.account)
+    if (
+      s.account !== conn.credentials.account ||
+      s.cacheId !== conn.credentials.cacheId
+    )
       throw fail("account_mismatch", 403);
     return s;
   }
   async release(s) {
     await s.bridge?.close();
-    s.cache?.close();
+    if (s.cache) {
+      const entry = this.caches.get(s.cacheId);
+      if (entry && --entry.references === 0) {
+        entry.cache.close();
+        this.caches.delete(s.cacheId);
+      }
+      s.cache = null;
+    }
     await fs.rm(s.lock, { force: true });
   }
   async drop(id) {
@@ -264,6 +292,10 @@ export class Pool {
       } catch {}
     }
     await fs.rm(this.profile(id), { recursive: true, force: true });
+  }
+  async dropCache(id) {
+    if (this.caches.has(id)) throw fail("session_in_use", 409);
+    await fs.rm(this.cacheDir(id), { recursive: true, force: true });
   }
   async restore() {
     const root = path.join(this.ctx.dataDir, "profiles");

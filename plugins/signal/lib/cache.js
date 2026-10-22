@@ -33,6 +33,16 @@ export class Cache {
         "CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT);" +
         "INSERT OR IGNORE INTO metadata VALUES('createdAt',strftime('%s','now'));",
     );
+    const owner = this.db
+      .prepare("SELECT value FROM metadata WHERE key='account'")
+      .get();
+    if (owner && owner.value !== account) {
+      this.db.close();
+      throw fail("account_mismatch", 403);
+    }
+    this.db
+      .prepare("INSERT OR IGNORE INTO metadata VALUES('account',?)")
+      .run(account);
   }
   addChat(kind, target, name = "") {
     target = identity(target);

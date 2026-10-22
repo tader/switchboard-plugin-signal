@@ -40,7 +40,7 @@ jobs:
             .local/downloads
             .local/build-sources/libsignal/libsignal-0.103.0/target
             .local/libsignal
-          key: signal-runtime-${{ matrix.platform }}-${{ hashFiles('runtime-pins.json', 'scripts/build-arm64.sh') }}
+          key: signal-runtime-${{ matrix.platform }}-${{ hashFiles('runtime-pins.json', 'scripts/build-arm64.sh', 'scripts/protoc.sh') }}
       - name: Build Debian-compatible ARM64 Signal library
         if: matrix.platform == 'linux-arm64'
         run: test -f .local/libsignal/libsignal_jni_aarch64.so || bash scripts/build-arm64.sh

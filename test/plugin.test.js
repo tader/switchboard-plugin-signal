@@ -323,3 +323,63 @@ test("platform selection and checksum verification fail closed", () => {
     /checksum/,
   );
 });
+
+test("replacement devices preserve cache and receipts and cannot link a different account", async (t) => {
+  const f = await fixture(t),
+    first = await f.connect(),
+    chat = "d:" + peer;
+  const body = {
+    chat,
+    text: "before relink",
+    idempotencyKey: "before-relink-send",
+  };
+  assert.equal((await f.call(first, "POST", "/messages", body)).data.ok, true);
+  const poll = async (step) => {
+    for (let i = 0; i < 100; i++) {
+      const r = await f.auth.poll({ pending: step.pending });
+      if (!r.wait) return r;
+      await wait(10);
+    }
+    throw Error("Fixture pairing timed out");
+  };
+  const step = await f.auth.connect({
+    config: { access: "write", relink: true },
+    connection: first,
+  });
+  const linked = await poll(step),
+    second = { ...first, ...linked };
+  assert.notEqual(second.credentials.profile, first.credentials.profile);
+  assert.equal(second.credentials.cacheId, first.credentials.cacheId);
+  assert.equal(
+    (await f.call(second, "POST", "/messages", body)).data.replayed,
+    true,
+  );
+  assert(
+    (await f.call(second, "GET", "/messages?chat=" + encodeURIComponent(chat)))
+      .data.items.length > 0,
+  );
+  await assert.rejects(() =>
+    fs.access(path.join(f.dir, "profiles", first.credentials.profile)),
+  );
+  const previous = process.env.SIGNAL_FIXTURE_ACCOUNT;
+  let wrong;
+  try {
+    process.env.SIGNAL_FIXTURE_ACCOUNT = peer;
+    wrong = await f.auth.connect({
+      config: { access: "write", relink: true },
+      connection: second,
+    });
+  } finally {
+    if (previous === undefined) delete process.env.SIGNAL_FIXTURE_ACCOUNT;
+    else process.env.SIGNAL_FIXTURE_ACCOUNT = previous;
+  }
+  await assert.rejects(() => poll(wrong), /originally/);
+  assert.equal(
+    (await f.call(second, "GET", "/writes?idempotencyKey=before-relink-send"))
+      .data.state,
+    "accepted",
+  );
+  await f.auth.revoke(second);
+  assert.deepEqual(await fs.readdir(path.join(f.dir, "caches")), []);
+  assert.deepEqual(await fs.readdir(path.join(f.dir, "profiles")), []);
+});
