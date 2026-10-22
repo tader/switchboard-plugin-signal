@@ -1,0 +1,58 @@
+name: Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Expected head commit for bot-created release PR checks
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Check dispatched revision
+        if: github.event_name == 'workflow_dispatch' && inputs.expected_sha != ''
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tader/switchboard
+          ref: 8a09c51d833ced905290eda600feb6ca93c599f6
+          path: switchboard-core
+      - run: npm ci --prefix switchboard-core
+      - run: npm run integration
+        env:
+          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
+      - run: npm run integration:peers
+        env:
+          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
+  runtimes:
+    uses: ./.github/workflows/runtime.yml
+    with:
+      ref: ${{ github.sha }}
+      upload: false
+  check:
+    if: always()
+    needs: [test, runtimes]
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          TEST_RESULT: ${{ needs.test.result }}
+          RUNTIME_RESULT: ${{ needs.runtimes.result }}
+        run: test "$TEST_RESULT" = success && test "$RUNTIME_RESULT" = success

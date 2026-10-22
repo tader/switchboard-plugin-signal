@@ -1,0 +1,88 @@
+name: Publish reviewed Signal version
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: signal-publish
+  cancel-in-progress: false
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      version: ${{ steps.plan.outputs.version }}
+      reconcile: ${{ steps.plan.outputs.reconcile }}
+      pr: ${{ steps.plan.outputs.pr }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release.js plan >> "$GITHUB_OUTPUT"
+  runtimes:
+    needs: select
+    if: needs.select.outputs.publish == 'true'
+    uses: ./.github/workflows/runtime.yml
+    with:
+      ref: ${{ github.sha }}
+      upload: true
+  publish:
+    needs: [select, runtimes]
+    if: needs.select.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tader/switchboard
+          ref: 8a09c51d833ced905290eda600feb6ca93c599f6
+          path: switchboard-core
+      - run: npm ci --prefix switchboard-core
+      - run: npm run integration && npm run integration:peers
+        env:
+          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: signal-runtime-*
+          path: .local/release
+          merge-multiple: true
+      - run: python3 scripts/build-runtime.py --sources
+      - name: Publish complete matching runtime assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PR: ${{ needs.select.outputs.pr }}
+        run: node scripts/release.js publish
+  reconcile:
+    needs: select
+    if: needs.select.outputs.reconcile == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - env:
+          GH_${{ github.token }}: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release.js reconcile
