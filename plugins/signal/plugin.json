@@ -1,7 +1,7 @@
 {
   "id": "signal",
   "name": "Signal",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Signal linked-device chats, cached messages, text, quoted replies, reactions and poll votes.",
   "icon": "icon.svg",
   "settings": [
