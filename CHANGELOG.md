@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.1...v1.0.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* recover Signal sessions after process restarts ([#5](https://github.com/tader/switchboard-plugin-signal/issues/5)) ([8c6521e](https://github.com/tader/switchboard-plugin-signal/commit/8c6521e86b7372a2d4ee83361770b55179712c1a))
+
 ## [1.0.1](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.0...v1.0.1) (2026-10-22)
 
 
