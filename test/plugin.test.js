@@ -194,15 +194,13 @@ test("real subprocess QR flow, cache privacy, direct/group reads, writes and dur
     ).status,
     403,
   );
-  await assert.rejects(
-    () =>
-      f.call(
-        { ...conn, credentials: { ...conn.credentials, account: peer } },
-        "GET",
-        "/status",
-      ),
-    /originally/,
+  const mismatched = await f.call(
+    { ...conn, credentials: { ...conn.credentials, account: peer } },
+    "GET",
+    "/status",
   );
+  assert.equal(mismatched.status, 403);
+  assert.equal(mismatched.data.error.code, "account_mismatch");
   const restricted = (
     await f.call(conn, "GET", "/messages?chat=" + encodeURIComponent(chat))
   ).data.items.find((m) => m.restricted);
