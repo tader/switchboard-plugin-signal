@@ -112,7 +112,16 @@ export async function createAdapter(ctx, { pool = new Pool(ctx) } = {}) {
     throw e;
   }
   const origin = new URL(`http://127.0.0.1:${server.address().port}`);
-  await pool.restore?.();
+  // Setup must finish before core's activation deadline. Runtime downloads and
+  // receiving restoration continue independently and are cancelled on dispose.
+  const restoration = Promise.resolve()
+    .then(() => pool.restore?.())
+    .catch(() => {
+      if (!closed)
+        ctx.log.warn(
+          "Signal session restoration failed; retry status or reconnect if necessary.",
+        );
+    });
   return {
     services: [
       {
@@ -141,7 +150,9 @@ export async function createAdapter(ctx, { pool = new Pool(ctx) } = {}) {
               const op = route(req.method, req.url);
               if (!op) throw fail("request_forbidden", 403);
               if (invocations.size >= 1024) throw fail("adapter_busy", 503);
-              await auth.ready(conn);
+              // Session readiness and account/access checks also run in Service.
+              // Let that handler return retryable 503 responses during startup,
+              // rather than turning them into core authentication failures.
               const credentials = conn.credentials;
               const key = randomBytes(32).toString("base64url");
               invocations.set(key, {
@@ -168,6 +179,7 @@ export async function createAdapter(ctx, { pool = new Pool(ctx) } = {}) {
         server.closeIdleConnections();
       });
       await pool.close();
+      await restoration;
       await drained;
       service.dispose();
     },

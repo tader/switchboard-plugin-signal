@@ -12,6 +12,8 @@ On your phone, open **Signal → Settings → Linked devices → Link new device
 
 The owner needs Node 24+, `tar`, a system file-lock utility (`flock` from util-linux on Linux, built-in `lockf` on macOS), outbound access to GitHub releases and Signal, and write access to plugin data. Supported hosts are macOS Intel/Apple Silicon and glibc Linux x64/ARM64, including Switchboard's Debian Docker image.
 
+After an update, Signal prepares its runtime and restores existing linked devices in the background. If a request reports that Signal is starting, wait and retry it; you do not need to link the device again. No message is sent while the session is still being restored.
+
 ## Recovery
 
 - **Upgrade requirement:** update Switchboard to a release with QR device authorization.

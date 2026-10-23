@@ -27,8 +27,10 @@ export function checksumFor(sums, name) {
   if (matches.length !== 1) throw fail("helper_checksum_mismatch", 502);
   return matches[0][1];
 }
-async function download(url, file, max, expected) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(180000) });
+async function download(url, file, max, expected, signal) {
+  const r = await fetch(url, {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(180000)]),
+  });
   if (!r.ok || !r.body) throw fail("helper_release_unavailable", 503);
   const handle = await fs.open(file, "wx", 0o600),
     hash = createHash("sha256");
@@ -46,7 +48,24 @@ async function download(url, file, max, expected) {
   if (hash.digest("hex") !== expected)
     throw fail("helper_checksum_mismatch", 502);
 }
-export async function ensureRuntime(ctx) {
+async function waitForInstall(entry, signal) {
+  entry.waiters++;
+  let onAbort;
+  try {
+    if (!signal) return await entry.promise;
+    const aborted = new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+    return await Promise.race([entry.promise, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    if (--entry.waiters === 0 && !entry.settled) entry.controller.abort();
+  }
+}
+export async function ensureRuntime(ctx, { signal } = {}) {
+  signal?.throwIfAborted();
   if (ctx.settings.signalCliPath) {
     const executable = ctx.settings.signalCliPath;
     if (!path.isAbsolute(executable)) throw fail("invalid_helper_path", 503);
@@ -72,67 +91,92 @@ export async function ensureRuntime(ctx) {
     return launch();
   } catch {}
   const lock = root;
-  if (!inflight.has(lock))
-    inflight.set(
-      lock,
-      (async () => {
-        await fs.mkdir(path.dirname(root), { recursive: true, mode: 0o700 });
-        const tmp = root + "." + randomUUID();
-        await fs.mkdir(tmp, { mode: 0o700 });
-        try {
-          const base =
-            "https://github.com/tader/switchboard-plugin-signal/releases/download/v" +
-            version +
-            "/";
-          const response = await fetch(base + "sha256sums.txt", {
-            signal: AbortSignal.timeout(30000),
-          });
-          if (!response.ok) throw fail("helper_release_unavailable", 503);
-          const sums = await response.text();
-          if (sums.length > 65536) throw fail("helper_checksum_mismatch", 502);
-          const name = "signal-runtime-" + key + ".tar.gz",
-            archive = path.join(tmp, "bundle.tgz");
-          await download(
-            base + name,
-            archive,
-            400 * 1024 * 1024,
-            checksumFor(sums, name),
-          );
-          const { stdout: names } = await exec("tar", ["-tzf", archive], {
-            maxBuffer: 8 * 1024 * 1024,
-          });
-          const { stdout: types } = await exec("tar", ["-tvzf", archive], {
-            maxBuffer: 8 * 1024 * 1024,
-          });
-          if (
-            names
-              .split("\n")
-              .filter(Boolean)
-              .some(
-                (n) =>
-                  !/^runtime(?:\/|$)/.test(n) || n.split("/").includes(".."),
-              ) ||
-            types
-              .split("\n")
-              .filter(Boolean)
-              .some((n) => !["-", "d"].includes(n[0]))
-          )
-            throw fail("invalid_runtime_archive", 502);
-          await exec("tar", ["-xzf", archive, "-C", tmp]);
-          await fs.unlink(archive);
-          await fs.access(
-            path.join(tmp, "runtime/jre/bin/java"),
-            fs.constants.X_OK,
-          );
-          await fs.writeFile(path.join(tmp, ".verified"), version + "\n", {
-            mode: 0o600,
-          });
-          await fs.rename(tmp, root);
-        } finally {
-          await fs.rm(tmp, { recursive: true, force: true });
-        }
-      })().finally(() => inflight.delete(lock)),
-    );
-  await inflight.get(lock);
+  let entry = inflight.get(lock);
+  if (!entry) {
+    entry = {
+      controller: new AbortController(),
+      waiters: 0,
+      settled: false,
+      promise: null,
+    };
+    const current = entry,
+      installSignal = entry.controller.signal;
+    inflight.set(lock, entry);
+    entry.promise = (async () => {
+      await fs.mkdir(path.dirname(root), { recursive: true, mode: 0o700 });
+      const tmp = root + "." + randomUUID();
+      await fs.mkdir(tmp, { mode: 0o700 });
+      try {
+        const base =
+          "https://github.com/tader/switchboard-plugin-signal/releases/download/v" +
+          version +
+          "/";
+        const response = await fetch(base + "sha256sums.txt", {
+          signal: AbortSignal.any([installSignal, AbortSignal.timeout(30000)]),
+        });
+        if (!response.ok) throw fail("helper_release_unavailable", 503);
+        const sums = await response.text();
+        if (sums.length > 65536) throw fail("helper_checksum_mismatch", 502);
+        const name = "signal-runtime-" + key + ".tar.gz",
+          archive = path.join(tmp, "bundle.tgz");
+        await download(
+          base + name,
+          archive,
+          400 * 1024 * 1024,
+          checksumFor(sums, name),
+          installSignal,
+        );
+        const { stdout: names } = await exec("tar", ["-tzf", archive], {
+          maxBuffer: 8 * 1024 * 1024,
+          signal: installSignal,
+        });
+        const { stdout: types } = await exec("tar", ["-tvzf", archive], {
+          maxBuffer: 8 * 1024 * 1024,
+          signal: installSignal,
+        });
+        if (
+          names
+            .split("\n")
+            .filter(Boolean)
+            .some(
+              (n) => !/^runtime(?:\/|$)/.test(n) || n.split("/").includes(".."),
+            ) ||
+          types
+            .split("\n")
+            .filter(Boolean)
+            .some((n) => !["-", "d"].includes(n[0]))
+        )
+          throw fail("invalid_runtime_archive", 502);
+        await exec("tar", ["-xzf", archive, "-C", tmp], {
+          signal: installSignal,
+        });
+        await fs.unlink(archive);
+        await fs.access(
+          path.join(tmp, "runtime/jre/bin/java"),
+          fs.constants.X_OK,
+        );
+        await fs.writeFile(path.join(tmp, ".verified"), version + "\n", {
+          mode: 0o600,
+        });
+        installSignal.throwIfAborted();
+        await fs.rename(tmp, root);
+      } finally {
+        await fs.rm(tmp, { recursive: true, force: true });
+      }
+    })().finally(() => {
+      current.settled = true;
+      if (inflight.get(lock) === current) inflight.delete(lock);
+    });
+  }
+  try {
+    await waitForInstall(entry, signal);
+  } catch (error) {
+    // An earlier owner's cancelled install must finish cleaning up before a
+    // subsequent owner retries publishing the same runtime directory.
+    if (!signal?.aborted && entry.controller.signal.aborted)
+      return ensureRuntime(ctx, { signal });
+    throw error;
+  }
+  signal?.throwIfAborted();
   return launch();
 }

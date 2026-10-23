@@ -125,6 +125,8 @@ export class Pool {
     this.ctx = ctx;
     this.helpers = new Map();
     this.caches = new Map();
+    this.sessions = new Map();
+    this.controller = new AbortController();
     this.closed = false;
   }
   profile(id) {
@@ -168,7 +170,9 @@ export class Pool {
         subscribed: false,
         lastEventAt: null,
       };
+      this.sessions.set(id, s);
       try {
+        if (this.closed) throw fail("plugin_unavailable", 503);
         await checkLegacyOwner(dir);
         await fs.mkdir(dir, { recursive: true, mode: 0o700 });
         await fs.chmod(dir, 0o700);
@@ -181,7 +185,10 @@ export class Pool {
           }),
           { mode: 0o600 },
         );
-        const runtime = await ensureRuntime(this.ctx);
+        const runtime = await ensureRuntime(this.ctx, {
+          signal: this.controller.signal,
+        });
+        if (this.closed) throw fail("plugin_unavailable", 503);
         s.bridge = new Bridge(
           runtime,
           dir,
@@ -204,6 +211,7 @@ export class Pool {
         if (marker && !account) throw fail("signin_required", 401);
         if (account) await this.activate(s, account, marker.cacheId ?? id);
         if (this.closed) throw fail("plugin_unavailable", 503);
+        s.ready = true;
         return s;
       } catch (e) {
         await this.release(s);
@@ -269,6 +277,8 @@ export class Pool {
     return s;
   }
   async session(conn) {
+    if (this.restoring && !this.sessions.get(conn.credentials.profile)?.ready)
+      throw fail("helper_starting", 503, { retryAfter: 3 });
     const s = await this.get(conn.credentials.profile);
     if (!s.account) throw fail("signin_required", 401);
     if (
@@ -305,7 +315,12 @@ export class Pool {
               if (owner?.token === s.ownerToken)
                 await fs.rm(s.lock, { force: true });
             } finally {
-              await s.lockHandle.close();
+              try {
+                await s.lockHandle.close();
+              } finally {
+                if (this.sessions.get(s.profile) === s)
+                  this.sessions.delete(s.profile);
+              }
             }
           }
         }
@@ -334,28 +349,47 @@ export class Pool {
     await fs.rm(this.cacheDir(id), { recursive: true, force: true });
   }
   async restore() {
-    const root = path.join(this.ctx.dataDir, "profiles");
-    let ids;
+    this.restoring = true;
     try {
-      ids = await fs.readdir(root);
-    } catch {
-      return;
-    }
-    for (const id of ids) {
+      const root = path.join(this.ctx.dataDir, "profiles");
+      let ids;
       try {
-        await fs.access(path.join(this.profile(id), "active.json"));
-        await this.get(id);
-      } catch {
-        this.ctx.log.warn(
-          "A saved Signal session is unavailable; reconnect it if necessary.",
-        );
+        ids = await fs.readdir(root);
+      } catch (error) {
+        if (error.code === "ENOENT") return;
+        throw error;
       }
+      for (const id of ids) {
+        if (this.closed) break;
+        try {
+          try {
+            await fs.access(path.join(this.profile(id), "active.json"));
+          } catch (error) {
+            if (error.code === "ENOENT") continue;
+            throw error;
+          }
+          await this.get(id);
+        } catch {
+          if (!this.closed)
+            this.ctx.log.warn(
+              "A saved Signal session is unavailable; retry status or reconnect if necessary.",
+            );
+        }
+      }
+    } finally {
+      this.restoring = false;
     }
   }
   async close() {
     this.closed = true;
+    this.controller.abort(fail("plugin_unavailable", 503));
     const all = [...this.helpers.values()];
     this.helpers.clear();
+    // Close even helpers still waiting for their first RPC. Pending runtime
+    // work is aborted and checked before any subsequent process can spawn.
+    await Promise.allSettled(
+      [...this.sessions.values()].map((s) => this.release(s)),
+    );
     for (const item of all) {
       try {
         await this.release(await item);

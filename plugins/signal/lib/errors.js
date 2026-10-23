@@ -3,6 +3,8 @@ export class SignalError extends Error {
     super(
       {
         signin_required: "Reconnect Signal to restore this linked device.",
+        helper_starting:
+          "Signal is preparing its runtime and restoring your linked device. Wait a moment and retry. No message was sent.",
         session_in_use:
           "Another process is using this Signal session. Stop the other Switchboard instance or Signal helper before retrying. No message was sent.",
         session_lock_unavailable:
