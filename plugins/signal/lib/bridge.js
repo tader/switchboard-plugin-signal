@@ -6,8 +6,9 @@ import { randomUUID } from "node:crypto";
 import { ensureRuntime } from "./runtime.js";
 import { Cache } from "./cache.js";
 import { fail } from "./errors.js";
+import { acquireSessionLock, checkLegacyOwner } from "./session-lock.js";
 export class Bridge {
-  constructor(runtime, dir, onReceive = () => {}) {
+  constructor(runtime, dir, onReceive = () => {}, lockFd = undefined) {
     this.pending = new Map();
     this.buffer = "";
     this.decoder = new StringDecoder("utf8");
@@ -26,7 +27,14 @@ export class Bridge {
         "--ignore-avatars",
         "--ignore-stickers",
       ],
-      { stdio: ["pipe", "pipe", "ignore"] },
+      {
+        stdio: [
+          "pipe",
+          "pipe",
+          "ignore",
+          ...(Number.isInteger(lockFd) ? [lockFd] : []),
+        ],
+      },
     );
     this.exited = new Promise((resolve) => this.child.once("close", resolve));
     const broken = () => this.fail();
@@ -145,45 +153,44 @@ export class Pool {
       return replacement;
     }
     const promise = (async () => {
-      const dir = this.profile(id);
-      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-      await fs.chmod(dir, 0o700);
-      const runtime = await ensureRuntime(this.ctx),
-        lock = path.join(dir, "owner.json");
-      try {
-        const handle = await fs.open(lock, "wx", 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid }));
-        await handle.close();
-      } catch (e) {
-        if (e.code !== "EEXIST") throw e;
-        let alive = true;
-        try {
-          const old = JSON.parse(await fs.readFile(lock, "utf8"));
-          process.kill(old.pid, 0);
-        } catch (e) {
-          if (e.code === "ESRCH" || e instanceof SyntaxError) alive = false;
-          else throw fail("session_in_use", 409);
-        }
-        if (alive) throw fail("session_in_use", 409);
-        await fs.unlink(lock);
-        const handle = await fs.open(lock, "wx", 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid }));
-        await handle.close();
-      }
+      const dir = this.profile(id),
+        lock = path.join(dir, "owner.json"),
+        ownerToken = randomUUID(),
+        lockHandle = await acquireSessionLock(this.ctx, id);
       const s = {
         profile: id,
         dir,
         lock,
+        lockHandle,
+        ownerToken,
         account: null,
         cache: null,
         subscribed: false,
         lastEventAt: null,
       };
       try {
-        s.bridge = new Bridge(runtime, dir, (params) => {
-          s.lastEventAt = Date.now();
-          s.cache?.ingest(params);
-        });
+        await checkLegacyOwner(dir);
+        await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+        await fs.chmod(dir, 0o700);
+        await fs.writeFile(
+          lock,
+          JSON.stringify({
+            pid: process.pid,
+            lockVersion: 2,
+            token: ownerToken,
+          }),
+          { mode: 0o600 },
+        );
+        const runtime = await ensureRuntime(this.ctx);
+        s.bridge = new Bridge(
+          runtime,
+          dir,
+          (params) => {
+            s.lastEventAt = Date.now();
+            s.cache?.ingest(params);
+          },
+          lockHandle.fd,
+        );
         const accounts = await s.bridge.call("listAccounts");
         let marker;
         try {
@@ -272,16 +279,38 @@ export class Pool {
     return s;
   }
   async release(s) {
-    await s.bridge?.close();
-    if (s.cache) {
-      const entry = this.caches.get(s.cacheId);
-      if (entry && --entry.references === 0) {
-        entry.cache.close();
-        this.caches.delete(s.cacheId);
-      }
-      s.cache = null;
-    }
-    await fs.rm(s.lock, { force: true });
+    if (!s.releasePromise)
+      s.releasePromise = (async () => {
+        try {
+          await s.bridge?.close();
+        } finally {
+          try {
+            if (s.cache) {
+              const entry = this.caches.get(s.cacheId);
+              if (entry && --entry.references === 0) {
+                entry.cache.close();
+                this.caches.delete(s.cacheId);
+              }
+              s.cache = null;
+            }
+          } finally {
+            try {
+              let owner;
+              try {
+                owner = JSON.parse(await fs.readFile(s.lock, "utf8"));
+              } catch (error) {
+                if (error.code !== "ENOENT" && !(error instanceof SyntaxError))
+                  throw error;
+              }
+              if (owner?.token === s.ownerToken)
+                await fs.rm(s.lock, { force: true });
+            } finally {
+              await s.lockHandle.close();
+            }
+          }
+        }
+      })();
+    return s.releasePromise;
   }
   async drop(id) {
     const pending = this.helpers.get(id);
@@ -291,7 +320,14 @@ export class Pool {
         await this.release(await pending);
       } catch {}
     }
-    await fs.rm(this.profile(id), { recursive: true, force: true });
+    const dir = this.profile(id),
+      lockHandle = await acquireSessionLock(this.ctx, id);
+    try {
+      await checkLegacyOwner(dir);
+      await fs.rm(dir, { recursive: true, force: true });
+    } finally {
+      await lockHandle.close();
+    }
   }
   async dropCache(id) {
     if (this.caches.has(id)) throw fail("session_in_use", 409);

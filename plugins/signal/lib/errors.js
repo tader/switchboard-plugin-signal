@@ -3,6 +3,10 @@ export class SignalError extends Error {
     super(
       {
         signin_required: "Reconnect Signal to restore this linked device.",
+        session_in_use:
+          "Another process is using this Signal session. Stop the other Switchboard instance or Signal helper before retrying. No message was sent.",
+        session_lock_unavailable:
+          "Signal could not acquire a system session lock. Linux hosts need flock from util-linux; macOS hosts need the built-in lockf utility.",
         pairing_expired:
           "The pairing QR code expired. Start the connection again.",
         pairing_failed:

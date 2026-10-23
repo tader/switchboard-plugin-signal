@@ -10,7 +10,7 @@ Add a Signal connection and select read-only or read/write access. The first con
 
 On your phone, open **Signal → Settings → Linked devices → Link new device** and scan Switchboard's QR code. Keep the dialog open until linking completes. Codes expire after 150 seconds. Close and restart an expired or cancelled flow. Existing numbered and numberless accounts are supported.
 
-The owner needs Node 24+, `tar`, outbound access to GitHub releases and Signal, and write access to plugin data. Supported hosts are macOS Intel/Apple Silicon and glibc Linux x64/ARM64, including Switchboard's Debian Docker image.
+The owner needs Node 24+, `tar`, a system file-lock utility (`flock` from util-linux on Linux, built-in `lockf` on macOS), outbound access to GitHub releases and Signal, and write access to plugin data. Supported hosts are macOS Intel/Apple Silicon and glibc Linux x64/ARM64, including Switchboard's Debian Docker image.
 
 ## Recovery
 
@@ -19,7 +19,8 @@ The owner needs Node 24+, `tar`, outbound access to GitHub releases and Signal, 
 - **Wrong account:** link the original account, or create a separate connection.
 - **Unavailable runtime:** stable installations need a matching published release. A development installation can use an absolute local signal-cli executable.
 - **Checksum failure:** no downloaded program is executed. Retry after checking that the release assets are complete.
-- **Session in use:** stop the other instance. Never copy a live profile between running instances.
+- **Session in use:** another process holds the OS session lock. Stop the other instance or helper, then retry a read/status request. Stale PID files after a restart are recovered automatically; do not delete lock files while any instance or helper is running. Stop older plugin versions before sharing a data volume with the updated version. Never copy a live profile between running instances.
+- **System lock unavailable:** Linux hosts need the `flock` utility (util-linux); macOS uses `/usr/bin/lockf`. Session ownership fails closed if the utility cannot run. Persistent files in `locks/` are expected, including after a profile is deleted; their existence does not mean the profile is in use.
 - **Changed safety number:** verify the contact and use signal-cli's normal identity-management procedures. Changed keys are never automatically trusted.
 - **Uncertain delivery:** inspect the original idempotency key with `getSignalWriteStatus` and check Signal before sending again.
 

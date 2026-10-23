@@ -4,6 +4,8 @@ import os from "node:os";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { Bridge } from "../plugins/signal/lib/bridge.js";
+import { acquireSessionLock } from "../plugins/signal/lib/session-lock.js";
+import { randomUUID } from "node:crypto";
 const root = path.resolve(
   process.env.SIGNAL_RUNTIME_ROOT ?? ".local/runtime/runtime",
 );
@@ -29,6 +31,8 @@ execFileSync(
   { stdio: "inherit" },
 );
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "signal-runtime-smoke-"));
+const lockId = randomUUID();
+const lockHandle = await acquireSessionLock({ dataDir: dir }, lockId);
 const bridge = new Bridge(
   {
     executable: java,
@@ -40,13 +44,26 @@ const bridge = new Bridge(
     ],
   },
   dir,
+  () => {},
+  lockHandle.fd,
 );
 try {
   assert.deepEqual(await bridge.call("listAccounts"), []);
+  await lockHandle.close();
+  await assert.rejects(
+    async () => {
+      const unexpected = await acquireSessionLock({ dataDir: dir }, lockId);
+      await unexpected.close();
+    },
+    { code: "session_in_use" },
+  );
   console.log(
-    "PASS: real Signal JSON-RPC process starts offline with an empty private store",
+    "PASS: real Signal JSON-RPC starts offline, holds its session lock independently and releases it on exit",
   );
 } finally {
   await bridge.close();
+  await lockHandle.close();
+  const recovered = await acquireSessionLock({ dataDir: dir }, lockId);
+  await recovered.close();
   await fs.rm(dir, { recursive: true, force: true });
 }
