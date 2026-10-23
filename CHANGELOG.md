@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.2...v1.0.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* restore Signal sessions without blocking activation ([#7](https://github.com/tader/switchboard-plugin-signal/issues/7)) ([90a1cd1](https://github.com/tader/switchboard-plugin-signal/commit/90a1cd14ac77030c3443827422d6ccf473818c82))
+
 ## [1.0.2](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.1...v1.0.2) (2026-10-23)
 
 
