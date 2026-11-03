@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fail } from "./errors.js";
 export const digest = (value) =>
   createHash("sha256").update(value).digest("base64url");
@@ -20,6 +20,9 @@ export class Cache {
   constructor(dir, account) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.account = account;
+    this.listeners = new Set();
+    this.mutationDepth = 0;
+    this.closed = false;
     this.db = new DatabaseSync(path.join(dir, "cache.db"));
     fs.chmodSync(path.join(dir, "cache.db"), 0o600);
     this.db.exec(
@@ -31,6 +34,8 @@ export class Cache {
         "CREATE TABLE IF NOT EXISTS votes(poll TEXT PRIMARY KEY,counter INTEGER NOT NULL);" +
         "CREATE TABLE IF NOT EXISTS writes(key TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,state TEXT NOT NULL,result TEXT);" +
         "CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT);" +
+        "CREATE TABLE IF NOT EXISTS changefeed(seq INTEGER PRIMARY KEY AUTOINCREMENT,created INTEGER NOT NULL);" +
+        "CREATE INDEX IF NOT EXISTS changefeed_created ON changefeed(created);" +
         "INSERT OR IGNORE INTO metadata VALUES('createdAt',strftime('%s','now'));",
     );
     const owner = this.db
@@ -44,7 +49,200 @@ export class Cache {
       .prepare("INSERT OR IGNORE INTO metadata VALUES('account',?)")
       .run(account);
   }
-  addChat(kind, target, name = "") {
+  mutate(fn) {
+    if (this.closed) throw fail("plugin_unavailable", 503);
+    if (this.mutationDepth) return fn();
+    this.db.exec("BEGIN IMMEDIATE");
+    this.mutationDepth++;
+    let result,
+      changed = false;
+    try {
+      const before = this.db.prepare("SELECT total_changes() n").get().n;
+      result = fn();
+      changed = this.db.prepare("SELECT total_changes() n").get().n > before;
+      if (changed) {
+        this.db
+          .prepare("INSERT INTO changefeed(created) VALUES(?)")
+          .run(Date.now());
+        this.pruneChanges();
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this.mutationDepth--;
+    }
+    if (changed)
+      for (const listener of this.listeners) {
+        try {
+          listener();
+        } catch {}
+      }
+    return result;
+  }
+  pruneChanges() {
+    if (this.mutationDepth) return this._pruneChanges();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this._pruneChanges();
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  _pruneChanges() {
+    const expired = this.db
+      .prepare(
+        "SELECT COALESCE(MAX(seq),0) seq FROM changefeed INDEXED BY changefeed_created WHERE created<?",
+      )
+      .get(Date.now() - 7 * 86400000).seq;
+    const over = Math.max(
+      0,
+      Number(
+        this.db.prepare("SELECT COALESCE(MAX(seq),0) n FROM changefeed").get()
+          .n,
+      ) - 100000,
+    );
+    const floor = Math.max(
+      expired,
+      over,
+      Number(
+        this.db
+          .prepare("SELECT value FROM metadata WHERE key='changeFloor'")
+          .get()?.value ?? 0,
+      ),
+    );
+    this.db.prepare("DELETE FROM changefeed WHERE seq<=?").run(floor);
+    this.db
+      .prepare(
+        "INSERT INTO metadata VALUES('changeFloor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE metadata.value<>excluded.value",
+      )
+      .run(String(floor));
+  }
+  changeHead() {
+    return Math.max(
+      Number(
+        this.db.prepare("SELECT COALESCE(MAX(seq),0) n FROM changefeed").get()
+          .n,
+      ),
+      Number(
+        this.db
+          .prepare("SELECT value FROM metadata WHERE key='changeFloor'")
+          .get()?.value ?? 0,
+      ),
+    );
+  }
+  changes(checkpoint, limit = 100) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw fail("invalid_input", 400);
+    if (this.closed) throw fail("plugin_unavailable", 503);
+    this.pruneChanges();
+    let epoch = this.db
+      .prepare("SELECT value FROM metadata WHERE key='changeEpoch'")
+      .get()?.value;
+    if (!epoch) {
+      epoch = randomUUID();
+      this.db
+        .prepare("INSERT INTO metadata VALUES('changeEpoch',?)")
+        .run(epoch);
+    }
+    const head = this.changeHead(),
+      floor = Number(
+        this.db
+          .prepare("SELECT value FROM metadata WHERE key='changeFloor'")
+          .get()?.value ?? 0,
+      );
+    let old;
+    try {
+      old = checkpoint
+        ? JSON.parse(Buffer.from(checkpoint, "base64url").toString())
+        : null;
+    } catch {}
+    const resync =
+      !old ||
+      old.epoch !== epoch ||
+      !Number.isSafeInteger(old.seq) ||
+      old.seq < floor ||
+      old.seq > head;
+    const rows = resync
+      ? []
+      : this.db
+          .prepare(
+            "SELECT seq FROM changefeed WHERE seq>? ORDER BY seq LIMIT ?",
+          )
+          .all(old.seq, limit);
+    const seq = resync ? head : (rows.at(-1)?.seq ?? old.seq);
+    return {
+      checkpoint: Buffer.from(JSON.stringify({ epoch, seq })).toString(
+        "base64url",
+      ),
+      events: resync
+        ? [
+            {
+              sourceId: `signal:${epoch}:resync:${seq}`,
+              event: {
+                category: "messaging",
+                type: "resync.required",
+                resourceType: "conversations",
+              },
+            },
+          ]
+        : rows.map((r) => ({
+            sourceId: `signal:${epoch}:${r.seq}`,
+            event: {
+              category: "messaging",
+              type: "invalidated",
+              resourceType: "conversations",
+              version: String(r.seq),
+            },
+          })),
+    };
+  }
+  waitForChange(checkpoint, signal, timeoutMs = 30000) {
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      let timer;
+      const done = (error) => {
+        clearTimeout(timer);
+        this.listeners.delete(wake);
+        signal.removeEventListener("abort", abort);
+        error ? reject(error) : resolve();
+      };
+      const wake = () => done(),
+        abort = () => done(signal.reason ?? Error("aborted"));
+      this.listeners.add(wake);
+      signal.addEventListener("abort", abort, { once: true });
+      try {
+        if (
+          this.closed ||
+          this.changes(checkpoint).events.length ||
+          signal.aborted
+        ) {
+          done(signal.aborted ? signal.reason : undefined);
+          return;
+        }
+      } catch (error) {
+        done(error);
+        return;
+      }
+      timer = setTimeout(wake, timeoutMs);
+    });
+  }
+  addChat(...args) {
+    return this.mutate(() => this._addChat(...args));
+  }
+  store(...args) {
+    return this.mutate(() => this._store(...args));
+  }
+  updateTarget(...args) {
+    return this.mutate(() => this._updateTarget(...args));
+  }
+  ingest(...args) {
+    return this.mutate(() => this._ingest(...args));
+  }
+  _addChat(kind, target, name = "") {
     target = identity(target);
     if (
       (kind === "direct" && !validAddress(target)) ||
@@ -54,7 +252,7 @@ export class Cache {
     const id = (kind === "group" ? "g:" : "d:") + target;
     this.db
       .prepare(
-        "INSERT INTO chats(id,kind,target,name) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE chats.name END",
+        "INSERT INTO chats(id,kind,target,name) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name WHERE excluded.name<>'' AND excluded.name<>chats.name",
       )
       .run(id, kind, target, String(name).slice(0, 256));
     return id;
@@ -71,7 +269,7 @@ export class Cache {
     if (!row) throw fail("message_not_in_synced_cache", 404);
     return JSON.parse(row.payload);
   }
-  store(chat, author, ts, data, outgoing = false) {
+  _store(chat, author, ts, data, outgoing = false) {
     if (!chat || !validAddress(author) || !Number.isSafeInteger(ts) || ts < 1)
       return null;
     const id = digest(JSON.stringify([this.account, chat, author, ts]));
@@ -132,26 +330,29 @@ export class Cache {
       };
     this.db
       .prepare(
-        "INSERT INTO messages VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload WHERE json_extract(excluded.payload,'$.restricted')=1",
+        "INSERT INTO messages VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload WHERE json_extract(excluded.payload,'$.restricted')=1 AND messages.payload<>excluded.payload",
       )
       .run(id, chat, author, ts, JSON.stringify(item));
     this.db
-      .prepare("UPDATE chats SET updated=max(updated,?) WHERE id=?")
-      .run(ts, chat);
+      .prepare("UPDATE chats SET updated=? WHERE id=? AND updated<?")
+      .run(ts, chat, ts);
     return item;
   }
-  updateTarget(chat, author, ts, change) {
+  _updateTarget(chat, author, ts, change) {
     const row = this.db
       .prepare(
         "SELECT id,payload FROM messages WHERE chat=? AND author=? AND ts=?",
       )
       .get(chat, identity(author), ts);
-    if (row)
-      this.db
-        .prepare("UPDATE messages SET payload=? WHERE id=?")
-        .run(JSON.stringify(change(JSON.parse(row.payload))), row.id);
+    if (row) {
+      const payload = JSON.stringify(change(JSON.parse(row.payload)));
+      if (payload !== row.payload)
+        this.db
+          .prepare("UPDATE messages SET payload=? WHERE id=?")
+          .run(payload, row.id);
+    }
   }
-  ingest(params) {
+  _ingest(params) {
     const r = params?.result ?? params,
       env = r?.envelope;
     if (!env) return;
@@ -379,6 +580,13 @@ export class Cache {
     return result;
   }
   close() {
+    this.closed = true;
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {}
+    }
+    this.listeners.clear();
     this.db.close();
   }
 }
