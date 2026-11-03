@@ -158,6 +158,7 @@ export function createMessagingContract(service, pool) {
     "messaging.messages.list": op(
       "messaging.messages.list",
       async (input, ctx) => {
+        if (input.threadId !== undefined) throw fail("invalid_input");
         const b = bound(ctx, "messages", input);
         const raw = await invokeLegacy(
           "listSignalMessages",
@@ -238,6 +239,10 @@ export function createMessagingContract(service, pool) {
         }),
     ),
   };
+  definitions["messaging.messages.list"].inputSchema = structuredClone(
+    definitions["messaging.messages.list"].inputSchema,
+  );
+  delete definitions["messaging.messages.list"].inputSchema.properties.threadId;
   definitions["messaging.messages.send"].inputSchema = structuredClone(
     definitions["messaging.messages.send"].inputSchema,
   );

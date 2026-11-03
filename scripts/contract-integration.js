@@ -113,6 +113,16 @@ try {
       .inputConstraints.properties.text.maxLength,
     4000,
   );
+  assert.equal(
+    (
+      await call("messaging.messages.list", {
+        conversationId: "fixture",
+        threadId: "unsupported-thread",
+      })
+    ).status,
+    400,
+    "unsupported thread filters must not return unfiltered history",
+  );
   const session = await pool.session({ credentials: connected.credentials });
   await until(
     () =>

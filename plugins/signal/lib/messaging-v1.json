@@ -125,6 +125,12 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          },
+          "threadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Optional opaque thread identifier. Returns the root and replies within this thread. Adapters without thread filtering must reject this field in inputConstraints."
           }
         },
         "required": [

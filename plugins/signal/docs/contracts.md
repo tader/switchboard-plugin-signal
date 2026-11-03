@@ -59,3 +59,7 @@ the staged core revision for the new HTTP/SSE integration.
 `npm run build:runtime` and `npm run test:runtime` verify the checksum-pinned native
 runtime on the current platform. CI additionally builds/tests all supported runtime
 platforms. All accounts and messages used in these checks are offline fixtures.
+
+The common message-history schema also defines an optional `threadId` filter. Signal
+does not advertise this input property: both its constraints and invocation reject
+it explicitly, rather than returning an unfiltered chat history.

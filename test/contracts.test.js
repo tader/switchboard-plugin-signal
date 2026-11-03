@@ -349,3 +349,14 @@ test("receive bursts coalesce to one invalidation at the latest durable sequence
   );
   assert.deepEqual(f.cache.changes(batch.checkpoint).events, []);
 });
+
+test("unsupported thread filters are rejected instead of returning unfiltered Signal history", async (t) => {
+  const f = fixture(t),
+    op = f.contract.operations["messaging.messages.list"];
+  const input = { conversationId: "chat", threadId: "thread" };
+  assert.equal(ajv.validate(op.inputSchema, input), false);
+  await assert.rejects(
+    op.invoke(input, f.ctx),
+    (e) => e.code === "invalid_input",
+  );
+});
