@@ -134,9 +134,7 @@ export class Cache {
       ),
     );
   }
-  changes(checkpoint, limit = 100) {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
-      throw fail("invalid_input", 400);
+  changes(checkpoint) {
     if (this.closed) throw fail("plugin_unavailable", 503);
     this.pruneChanges();
     let epoch = this.db
@@ -166,14 +164,9 @@ export class Cache {
       !Number.isSafeInteger(old.seq) ||
       old.seq < floor ||
       old.seq > head;
-    const rows = resync
-      ? []
-      : this.db
-          .prepare(
-            "SELECT seq FROM changefeed WHERE seq>? ORDER BY seq LIMIT ?",
-          )
-          .all(old.seq, limit);
-    const seq = resync ? head : (rows.at(-1)?.seq ?? old.seq);
+    // A category invalidation covers the current cache snapshot, so one frame can
+    // acknowledge the latest sequence even when a receive burst queued many changes.
+    const seq = head;
     return {
       checkpoint: Buffer.from(JSON.stringify({ epoch, seq })).toString(
         "base64url",
@@ -189,15 +182,19 @@ export class Cache {
               },
             },
           ]
-        : rows.map((r) => ({
-            sourceId: `signal:${epoch}:${r.seq}`,
-            event: {
-              category: "messaging",
-              type: "invalidated",
-              resourceType: "conversations",
-              version: String(r.seq),
-            },
-          })),
+        : old.seq < head
+          ? [
+              {
+                sourceId: `signal:${epoch}:${seq}`,
+                event: {
+                  category: "messaging",
+                  type: "invalidated",
+                  resourceType: "conversations",
+                  version: String(seq),
+                },
+              },
+            ]
+          : [],
     };
   }
   waitForChange(checkpoint, signal, timeoutMs = 30000) {

@@ -30,7 +30,9 @@ limit remains in force. Oversized input is rejected without sending.
 The owner-local cache records a metadata-only change sequence in the same SQLite
 transaction as each observable mutation. Duplicate ordinary deliveries do not append
 another change. Events invalidate the messaging snapshot and never include message
-text, authors or attachment contents. The native watch loop replays from a durable
+text, authors or attachment contents. Receive bursts coalesce to one category
+invalidation at the latest durable sequence; consumers invalidate their messaging
+snapshot, not just its newest page. The native watch loop replays from a durable
 opaque checkpoint, waits on receive callbacks, and awaits the core publication
 commit before advancing its local delivery cursor. It releases its wait listener
 when the core cancels it after inactivity, access/config changes or shutdown.

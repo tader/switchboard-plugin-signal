@@ -336,3 +336,16 @@ test("reply pointers round-trip and restricted quote targets are rejected withou
   );
   assert.equal(f.sends(), 0);
 });
+
+test("receive bursts coalesce to one invalidation at the latest durable sequence", (t) => {
+  const f = fixture(t),
+    cursor = f.cache.changes().checkpoint;
+  for (let i = 1; i <= 20; i++) incoming(f.cache, i * 1000);
+  const batch = f.cache.changes(cursor);
+  assert.equal(batch.events.length, 1);
+  assert.equal(
+    JSON.parse(Buffer.from(batch.checkpoint, "base64url")).seq,
+    f.cache.changeHead(),
+  );
+  assert.deepEqual(f.cache.changes(batch.checkpoint).events, []);
+});
