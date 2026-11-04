@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.3...v1.1.0) (2026-11-04)
+
+
+### Features
+
+* add shared Messaging contract and durable native change feed ([#9](https://github.com/tader/switchboard-plugin-signal/issues/9)) ([829b029](https://github.com/tader/switchboard-plugin-signal/commit/829b029c76c4720a12b18e8fa2182cc7a2673ac2))
+
 ## [1.0.3](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.2...v1.0.3) (2026-10-23)
 
 
