@@ -1,3 +1,4 @@
+import { createMessagingContract } from "./contracts.js";
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { Pool } from "./bridge.js";
@@ -132,6 +133,7 @@ export async function createAdapter(ctx, { pool = new Pool(ctx) } = {}) {
         baseUrl: "http://signal.localhost",
         allowedHosts: ["signal.localhost", origin.host],
         openapi,
+        contracts: createMessagingContract(service, pool),
         authMethods: [
           {
             ...auth.method,

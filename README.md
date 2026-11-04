@@ -75,3 +75,9 @@ Merging a release PR starts publication: four tested runtime bundles and corresp
 GitHub Actions settings must allow creating pull requests. GitHub combines that setting with permission to approve PRs; these workflows do not submit approving reviews. Main requires PRs and passing CI, including for administrators, with zero mandatory approving reviews.
 
 Downloads use the installed plugin's exact version and matching checksums. [Notices](NOTICE.md) and corresponding sources accompany runtime releases.
+
+## Shared Messaging contract (staged)
+
+The optional provider-independent Messaging v1 operations and native cache-change
+feed are described in [the contract guide](plugins/signal/docs/contracts.md).
+They require the staged shared-contract core; existing APIs remain available.

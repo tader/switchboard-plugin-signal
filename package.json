@@ -9,10 +9,12 @@
     "integration": "node --disable-warning=ExperimentalWarning scripts/integration.js",
     "build:runtime": "python3 scripts/build-runtime.py",
     "test:runtime": "node --disable-warning=ExperimentalWarning scripts/runtime-smoke.js",
-    "integration:peers": "node --disable-warning=ExperimentalWarning scripts/peer-integration.js"
+    "integration:peers": "node --disable-warning=ExperimentalWarning scripts/peer-integration.js",
+    "integration:contracts": "node --disable-warning=ExperimentalWarning scripts/contract-integration.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "ajv": "^8.20.0",
     "typescript": "^5.9.0"
   }
 }
