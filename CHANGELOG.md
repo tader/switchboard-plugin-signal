@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.2.0...v1.3.0) (2026-11-10)
+
+
+### Features
+
+* expose known Signal reaction users ([#14](https://github.com/tader/switchboard-plugin-signal/issues/14)) ([64996b6](https://github.com/tader/switchboard-plugin-signal/commit/64996b6c9004262d8d0e4df174f5f9624b2b2e03))
+
 ## [1.2.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.1.0...v1.2.0) (2026-11-10)
 
 
