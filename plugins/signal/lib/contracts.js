@@ -16,7 +16,7 @@ function conversation(raw) {
         : null,
   };
 }
-function message(raw, account) {
+function message(raw, account, cache) {
   const state =
     raw.type === "deleted"
       ? "deleted"
@@ -29,8 +29,14 @@ function message(raw, account) {
   const reactions = new Map();
   for (const [actor, emoji] of Object.entries(raw.reactions ?? {})) {
     if (!reactions.has(emoji))
-      reactions.set(emoji, { emoji, count: null, me: null });
-    if (actor === account) reactions.get(emoji).me = true;
+      reactions.set(emoji, { emoji, count: null, me: null, users: [], usersComplete: false });
+    const reaction = reactions.get(emoji);
+    if (actor === account) reaction.me = true;
+    if (reaction.users.length < 100 && typeof actor === "string" && actor.length > 0 && actor.length <= 2048) {
+      let name = null;
+      try { name = cache.chat("d:" + actor).name?.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0,512) || null; } catch (e) { if (e.code !== "chat_not_in_synced_cache") throw e; }
+      reaction.users.push({id:actor,displayName:name});
+    }
   }
   return {
     id: raw.id,
@@ -169,21 +175,24 @@ export function createMessagingContract(service, pool) {
           },
           ctx,
         );
+        const session = await pool.session(ctx.connection);
         return page(raw, b, (item) =>
-          message(item, ctx.connection.credentials.account),
+          message(item, ctx.connection.credentials.account, session.cache),
         );
       },
     ),
-    "messaging.messages.get": op("messaging.messages.get", async (input, ctx) =>
-      message(
+    "messaging.messages.get": op("messaging.messages.get", async (input, ctx) => {
+      const session = await pool.session(ctx.connection);
+      return message(
         await invokeLegacy(
           "getSignalMessage",
           { chat: input.conversationId, messageId: input.id },
           ctx,
         ),
         ctx.connection.credentials.account,
-      ),
-    ),
+        session.cache,
+      );
+    }),
     "messaging.messages.send": op(
       "messaging.messages.send",
       async (input, ctx) =>
