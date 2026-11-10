@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.1.0...v1.2.0) (2026-11-10)
+
+
+### Features
+
+* support shared chat reactions ([#12](https://github.com/tader/switchboard-plugin-signal/issues/12)) ([bf53800](https://github.com/tader/switchboard-plugin-signal/commit/bf538003bc8040e0f87dc111b3c316d91f2f92b6))
+
 ## [1.1.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.0.3...v1.1.0) (2026-11-04)
 
 
