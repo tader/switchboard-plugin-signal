@@ -362,10 +362,10 @@ test("unsupported thread filters are rejected instead of returning unfiltered Si
 });
 
 test("reaction removal publishes an explicit empty collection",async t=>{
- const f=fixture(t);incoming(f.cache,1000);
+ const f=fixture(t);f.cache.addChat("direct",peer,"Peer Name");incoming(f.cache,1000);
  const input={conversationId:"d:"+peer};
  incoming(f.cache,2000,{reaction:{targetAuthorUuid:peer,targetSentTimestamp:1000,emoji:"👍"}});
- let page=await call(f,"messaging.messages.list",input);assert.equal(page.items[0].reactions[0].emoji,"👍");
+ let page=await call(f,"messaging.messages.list",input);assert.equal(page.items[0].reactions[0].emoji,"👍");assert.deepEqual(page.items[0].reactions[0].users,[{id:peer,displayName:"Peer Name"}]);assert.equal(page.items[0].reactions[0].usersComplete,false);
  incoming(f.cache,3000,{reaction:{targetAuthorUuid:peer,targetSentTimestamp:1000,emoji:"👍",isRemove:true}});
  page=await call(f,"messaging.messages.list",input);assert.deepEqual(page.items[0].reactions,[]);
 });
