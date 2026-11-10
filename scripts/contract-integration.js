@@ -144,6 +144,15 @@ try {
     ),
   );
   assert.ok(!JSON.stringify(history).includes("DO-NOT-ARCHIVE"));
+  const actor = "22222222-2222-4222-8222-222222222222";
+  session.cache.addChat("direct", actor, "Fixture contact");
+  session.cache.ingest({result:{envelope:{sourceUuid:actor,timestamp:8000,dataMessage:{timestamp:8000,reaction:{targetAuthorUuid:actor,targetSentTimestamp:1000,emoji:"👍"}}}}});
+  const reactionsResponse = await call("messaging.messages.list", {conversationId});
+  assert.equal(reactionsResponse.status,200);
+  const reactionsPage=await reactionsResponse.json();
+  const reaction=reactionsPage.items.flatMap(item=>item.reactions??[]).find(item=>item.emoji==="👍");
+  assert.deepEqual(reaction.users,[{id:actor,displayName:"Fixture contact"}]);
+  assert.equal(reaction.usersComplete,false);
   for (let i = 0; i < 2; i++) {
     const response = await call(
       "messaging.messages.send",
