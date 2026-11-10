@@ -57,7 +57,7 @@ function message(raw, account) {
           ),
         }
       : {}),
-    ...(reactions.size ? { reactions: [...reactions.values()] } : {}),
+    ...(raw.reactions && typeof raw.reactions === "object" ? { reactions: [...reactions.values()] } : {}),
   };
 }
 function bound(ctx, kind, input) {

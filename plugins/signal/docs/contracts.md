@@ -18,7 +18,7 @@ updates are absent. Reads never send read receipts. Only exact targets in the
 owner-local synced cache are accepted; the contract does not invent recipients.
 
 History always reports `coverage.complete: false` / `synced_cache_only`. There is
-no history backfill. Unknown unread/reaction totals stay null. Restricted, deleted
+no history backfill. Unknown unread/reaction totals stay null. A known empty reaction collection is returned after the last cached reaction is removed; absent reaction metadata remains unknown. Restricted, deleted
 and unavailable content has null text. Disappearing/view-once bodies are not
 archived, published or quoted by the adapter. Outgoing write text is not cached;
 provider receive/sync establishes whether a body can be retained. Send constraints
