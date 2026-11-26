@@ -36,12 +36,19 @@ jobs:
           ref: 8a09c51d833ced905290eda600feb6ca93c599f6
           path: switchboard-core
       - run: npm ci --prefix switchboard-core
-      - run: npm run integration
-        env:
-          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
       - run: npm run integration:peers
         env:
           SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
+      - name: Checkout preview-capable core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tader/switchboard
+          ref: e0abe3b7deae20036f90ee0e2b36e23f70b1523e # v0.17.0
+          path: switchboard-preview-core
+      - run: npm ci --prefix switchboard-preview-core
+      - run: npm run integration
+        env:
+          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-preview-core
       - name: Checkout staged contract core
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

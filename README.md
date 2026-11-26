@@ -60,7 +60,7 @@ Deleting a connection removes its local profile. Also remove the device from you
 npm ci
 npm run check
 npm test
-SWITCHBOARD_ROOT=/path/to/switchboard npm run integration
+SWITCHBOARD_ROOT=/path/to/switchboard-0.17.0 npm run integration
 SWITCHBOARD_ROOT=/path/to/switchboard npm run integration:peers
 npm run build:runtime
 npm run test:runtime
