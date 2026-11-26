@@ -90,10 +90,14 @@ try {
     name: "Signal owner",
   });
   assert.equal(enrollment.status, 201);
-  const owner = await launch("owner", {
-    SWITCHBOARD_PEER_URL: consumer.url,
-    SWITCHBOARD_PEER_TOKEN: enrollment.data.token,
+  const owner = await launch("owner");
+  const link = await owner.call("POST", "/api/admin/peers", {
+    name: "Consumer",
+    direction: "outgoing",
+    url: consumer.url,
+    token: enrollment.data.token,
   });
+  assert.equal(link.status, 201);
   await wait(
     async () => (await owner.call("GET", "/api/admin/peers")).data[0]?.online,
   );

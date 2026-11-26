@@ -1,15 +1,11 @@
 ---
-title: Shared Messaging contract (staged)
+title: Shared Messaging contract
 services: [signal]
 ---
 
 # Shared Messaging contract
 
-This adds the optional generic Messaging v1 contract beside Signal's existing API.
-It depends on [Switchboard #40](https://github.com/tader/switchboard/pull/40), whose
-contract API remains disabled by default. The canonical JSON schema is vendored
-from the core. Existing authentication methods, session restoration and APIs remain
-available on older cores.
+Enable shared contracts on Switchboard to access synchronized conversations and messages.
 
 Implemented operations are conversation list/get, message list/get, message send
 with optional cached reply target, and reaction update. Read-only bindings expose
@@ -47,19 +43,3 @@ from Signal or complete provider history. Core SSE is resumable and at least onc
 Writes reuse a connection-namespaced form of the core intent key in Signal's existing
 persistent ledger. An uncertain dispatch is not resent. No new device pairing,
 provider consent or live test messages are performed by enabling these definitions.
-
-## Validation
-
-`npm run check`, `npm test`, `integration`, `integration:peers` and
-`integration:contracts` use offline fixtures. The last script needs a core with
-shared contracts and enables `SWITCHBOARD_SHARED_CONTRACTS=1` only in its temporary
-fixture instance. CI retains legacy-core compatibility checks and separately pins
-the staged core revision for the new HTTP/SSE integration.
-
-`npm run build:runtime` and `npm run test:runtime` verify the checksum-pinned native
-runtime on the current platform. CI additionally builds/tests all supported runtime
-platforms. All accounts and messages used in these checks are offline fixtures.
-
-The common message-history schema also defines an optional `threadId` filter. Signal
-does not advertise this input property: both its constraints and invocation reject
-it explicitly, rather than returning an unfiltered chat history.
