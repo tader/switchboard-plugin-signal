@@ -132,6 +132,15 @@ export async function createAdapter(ctx, { pool = new Pool(ctx) } = {}) {
         icon: "icon.svg",
         baseUrl: "http://signal.localhost",
         allowedHosts: ["signal.localhost", origin.host],
+        outputPreviews: [
+          {
+            origin: origin.origin,
+            method: /** @type {const} */ ("GET"),
+            path: "/capabilities",
+            authMethods: [auth.method.id],
+            fields: { historyCoverage: { maxBytes: 32 } },
+          },
+        ],
         openapi,
         contracts: createMessagingContract(service, pool),
         authMethods: [

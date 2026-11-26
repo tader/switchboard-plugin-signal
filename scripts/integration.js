@@ -19,6 +19,10 @@ process.env.SWITCHBOARD_DATA_DIR = path.join(dir, "data");
 process.env.SWITCHBOARD_WATCH_PLUGINS = "false";
 process.env.SWITCHBOARD_PUBLIC_URL = "http://localhost:8770";
 process.env.SWITCHBOARD_BUILTIN_PLUGINS_DIR = path.join(core, "plugins");
+process.env.SWITCHBOARD_ACTIVITY_PREVIEW_ROOT = path.join(dir, "outputs");
+process.env.SWITCHBOARD_ACTIVITY_PREVIEW_RESTORE_SAFE = "1";
+process.env.SWITCHBOARD_ACTIVITY_PREVIEW_INSTANCE = "signal-fixture";
+process.env.SWITCHBOARD_ACTIVITY_PREVIEW_EPOCH = "signal-fixture";
 fs.mkdirSync(process.env.SWITCHBOARD_DATA_DIR, { recursive: true });
 const load = (file) => import(pathToFileURL(path.join(core, file)).href),
   realFetch = globalThis.fetch;
@@ -154,6 +158,107 @@ try {
   const conn = connected.connection;
   await new Promise((r) => setTimeout(r, 30));
   const { execute } = await load("server/proxy.ts");
+  const output = await load("server/activity-output.ts");
+  const previewRoot = process.env.SWITCHBOARD_ACTIVITY_PREVIEW_ROOT;
+  const { openPreviewStore } = await load("shared/activity-preview-store.ts");
+  openPreviewStore(
+    previewRoot,
+    [process.env.SWITCHBOARD_DATA_DIR],
+    "signal-fixture",
+  );
+  const { config } = await load("server/config.ts");
+  config.previewStoreId = JSON.parse(
+    fs.readFileSync(path.join(previewRoot, "store.json"), "utf8"),
+  ).storeId;
+  output.initOutputStore();
+  assert.equal(output.outputCaptureAvailability().available, true);
+  output.setOutputRetention(4);
+
+  const installedFetch = globalThis.fetch;
+  const audited = async (
+    url,
+    { method = "GET", headers, reply, requests = 1 } = {},
+  ) => {
+    let upstream;
+    let count = 0;
+    globalThis.fetch = async (input, opts) => {
+      assert.equal(input.hostname, "127.0.0.1");
+      count++;
+      const response = reply
+        ? reply(opts.headers, count)
+        : await installedFetch(input, opts);
+      if (count === requests) upstream = response.clone();
+      return response;
+    };
+    try {
+      const result = await execute(
+        user,
+        conn.id,
+        { method, url, headers },
+        undefined,
+        { source: "proxy", tokenId: null, tokenName: null, ip: null, userAgent: null },
+      );
+      assert.ok(result.auditId);
+      assert.equal(result.response.status, upstream.status);
+      assert.deepEqual([...result.response.headers], [...upstream.headers]);
+      const body = Buffer.from(await result.response.arrayBuffer());
+      assert.deepEqual(body, Buffer.from(await upstream.arrayBuffer()));
+      assert.equal(count, requests);
+      return { body, ...output.readOutput(user.id, result.auditId, true) };
+    } finally {
+      globalThis.fetch = installedFetch;
+    }
+  };
+  const projected = { historyCoverage: "synced_cache_only" };
+  const capabilities = await audited("/capabilities");
+  const capabilityBody = JSON.parse(capabilities.body);
+  assert.equal(capabilityBody.access, "write");
+  assert.equal(capabilityBody.features.send, true);
+  assert.deepEqual(capabilities.preview, projected);
+  for (const [url, method] of [
+    ["/status", "GET"],
+    ["/capabilities?access=read", "GET"],
+    ["/capabilities", "HEAD"],
+  ]) {
+    assert.equal((await audited(url, { method })).state, "omitted");
+  }
+  const withPrivateFields = {
+    ...projected,
+    account: "private-fixture-account",
+    nested: { token: "private-fixture-token" },
+  };
+  const retried = await audited("/capabilities", {
+    requests: 2,
+    reply: (_, count) => count === 1
+      ? Response.json({ error: "retry" }, { status: 401 })
+      : Response.json(withPrivateFields),
+  });
+  assert.deepEqual(retried.preview, projected);
+  const credentialEcho = await audited("/capabilities", {
+    headers: [["x-api-key", "fixture-secret"]],
+    reply: (headers) => Response.json({ historyCoverage: headers.get("x-api-key") }),
+  });
+  assert.equal(credentialEcho.state, "omitted");
+  for (const reply of [
+    () => Response.json({ historyCoverage: "é".repeat(17) }),
+    () => Response.json(withPrivateFields, { status: 503 }),
+    () => new Response(null, { status: 204 }),
+    () => new Response(JSON.stringify(withPrivateFields)),
+    () => new Response("{", { headers: { "content-type": "application/json" } }),
+  ]) {
+    assert.equal((await audited("/capabilities", { reply })).state, "omitted");
+  }
+  assert.equal(database.one("SELECT count(*) AS count FROM audit_outputs").count, 2);
+  output.setOutputRetention(0);
+  assert.equal((await audited("/capabilities")).state, "disabled");
+  assert.equal(database.one("SELECT count(*) AS count FROM audit_outputs").count, 0);
+  output.setOutputRetention(4);
+  config.previewRestoreSafe = false;
+  output.initOutputStore();
+  assert.equal((await audited("/capabilities")).state, "omitted");
+  config.previewRestoreSafe = true;
+  output.initOutputStore();
+
   const call = async (method, url, body) => {
     const r = await execute(user, conn.id, {
       method,
@@ -254,6 +359,7 @@ try {
   await manager.setEnabled("signal", true);
   await ready();
   assert.equal((await call("POST", "/messages", input)).data.replayed, true);
+  assert.deepEqual((await audited("/capabilities")).preview, projected);
   assert.equal(sends(), 1);
   await manager.stop();
   await manager.start();
@@ -271,7 +377,7 @@ try {
     0,
   );
   console.log(
-    "PASS: real installer cold upgrade, prompt activation, safe initializing writes, cancellation, QR pairing, proxy, encrypted storage, durable receipts, restart and revocation; offline fixture only.",
+    "PASS: real installer cold upgrade, prompt activation, safe initializing writes, cancellation, QR pairing, audited HTTP and activity previews, encrypted storage, durable receipts, restart and revocation; offline fixture only.",
   );
 } finally {
   releaseDownload();

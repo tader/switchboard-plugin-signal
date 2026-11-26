@@ -36,6 +36,10 @@ Disappearing and view-once bodies are not archived. Received remote/administrato
 
 The plugin never automatically sends read receipts or typing indicators. Signal's normal transport delivery acknowledgments still occur. Identity trust follows signal-cli's default first-use policy; changed identities are never automatically trusted.
 
+## Activity output previews
+
+With Switchboard 0.17.0 and preview storage enabled, audited local Linked Device calls to the exact query-free `GET /capabilities` route can retain only the top-level `historyCoverage` string, up to 32 bytes. The rule follows the loopback origin assigned at setup. Access level, feature flags, account details, chats, message history, and shared Messaging contract results are excluded. Switchboard applies its activity output retention settings.
+
 ## Reliable writes
 
 Every write requires an `idempotencyKey`. Repeating identical accepted content returns its saved receipt, including after restarts or replacement-device linking. Different content with the same key fails. A helper exit, timeout, partial failure or invalid receipt after a write starts leaves durable state `attempted`: delivery is uncertain and the plugin does not resend.
