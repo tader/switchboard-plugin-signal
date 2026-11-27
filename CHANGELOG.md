@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.3.0...v1.4.0) (2026-11-27)
+
+
+### Features
+
+* add reviewed activity response previews ([79d26ea](https://github.com/tader/switchboard-plugin-signal/commit/79d26eab7acdf83c0a4f1870915e2bb034c82719))
+
 ## [1.3.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.2.0...v1.3.0) (2026-11-10)
 
 
