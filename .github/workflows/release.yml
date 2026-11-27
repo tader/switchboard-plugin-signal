@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_commit:
+        description: Full merged version-PR SHA to recover (blank uses workflow SHA)
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -12,12 +17,19 @@ jobs:
   select:
     runs-on: ubuntu-24.04
     outputs:
+      commit: ${{ steps.plan.outputs.commit }}
       publish: ${{ steps.plan.outputs.publish }}
       version: ${{ steps.plan.outputs.version }}
       reconcile: ${{ steps.plan.outputs.reconcile }}
       pr: ${{ steps.plan.outputs.pr }}
     steps:
+      - name: Validate recovery commit
+        env:
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: test -z "$RELEASE_COMMIT" || [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_commit || github.sha }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "24"
@@ -26,13 +38,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: node scripts/release.js plan >> "$GITHUB_OUTPUT"
+        run: |
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          node scripts/release.js plan >> "$GITHUB_OUTPUT"
   runtimes:
     needs: select
     if: needs.select.outputs.publish == 'true'
     uses: ./.github/workflows/runtime.yml
     with:
-      ref: ${{ github.sha }}
+      ref: ${{ needs.select.outputs.commit }}
       upload: true
   publish:
     needs: [select, runtimes]
@@ -44,6 +59,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.select.outputs.commit }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "24"
@@ -57,9 +74,19 @@ jobs:
           ref: 8a09c51d833ced905290eda600feb6ca93c599f6
           path: switchboard-core
       - run: npm ci --prefix switchboard-core
-      - run: npm run integration && npm run integration:peers
+      - run: npm run integration:peers
         env:
           SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-core
+      - name: Checkout preview-capable core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tader/switchboard
+          ref: e0abe3b7deae20036f90ee0e2b36e23f70b1523e # v0.17.0
+          path: switchboard-preview-core
+      - run: npm ci --prefix switchboard-preview-core
+      - run: npm run integration
+        env:
+          SWITCHBOARD_ROOT: ${{ github.workspace }}/switchboard-preview-core
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: signal-runtime-*
@@ -71,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_PR: ${{ needs.select.outputs.pr }}
-        run: node scripts/release.js publish
+        run: GITHUB_SHA="$(git rev-parse HEAD)" node scripts/release.js publish
   reconcile:
     needs: select
     if: needs.select.outputs.reconcile == 'true'
@@ -82,7 +109,9 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.select.outputs.commit }}
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: node scripts/release.js reconcile
+        run: GITHUB_SHA="$(git rev-parse HEAD)" node scripts/release.js reconcile
