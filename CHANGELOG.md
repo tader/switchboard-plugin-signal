@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/tader/switchboard-plugin-signal/compare/v1.4.0...v1.4.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* recover Signal publication from the approved release commit ([fd95154](https://github.com/tader/switchboard-plugin-signal/commit/fd95154ad124e11ece236ff0b19b74b8ba7eefc5))
+* validate recovery commits from trusted main before checkout ([899b493](https://github.com/tader/switchboard-plugin-signal/commit/899b493d3c7cd9d3b23104d5e812b7f74af7d54c))
+
 ## [1.4.0](https://github.com/tader/switchboard-plugin-signal/compare/v1.3.0...v1.4.0) (2026-11-27)
 
 
