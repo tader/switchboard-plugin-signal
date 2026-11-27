@@ -61,8 +61,38 @@ async function fixture(t, capable = true) {
     });
     return { status: response.status, data: await response.json() };
   };
-  return { dir, ctx, auth, connect, call };
+  return { dir, ctx, service, auth, connect, call };
 }
+test("capability preview follows the authorized origin on two live adapters", async (t) => {
+  const first = await fixture(t);
+  const second = await fixture(t);
+  const origins = [];
+  for (const [f, access] of [[first, "read"], [second, "write"]]) {
+    const conn = await f.connect(access);
+    const req = {
+      method: "GET",
+      url: new URL("/capabilities", f.service.baseUrl),
+      headers: new Headers(),
+    };
+    await f.auth.authorize(req, conn);
+    origins.push(req.url.origin);
+    assert.match(req.url.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+    assert.deepEqual(f.service.outputPreviews, [{
+      origin: req.url.origin,
+      method: "GET",
+      path: "/capabilities",
+      authMethods: ["linked-device"],
+      fields: { historyCoverage: { maxBytes: 32 } },
+    }]);
+    const response = await fetch(req.url, req);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "application/json");
+    const body = await response.json();
+    assert.equal(body.historyCoverage, "synced_cache_only");
+    assert.equal(body.access, access);
+  }
+  assert.notEqual(origins[0], origins[1]);
+});
 test("real subprocess QR flow, cache privacy, direct/group reads, writes and durable receipts", async (t) => {
   const f = await fixture(t),
     conn = await f.connect();
